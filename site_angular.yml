@@ -1,11 +1,9 @@
 ---
 - name: Deploy Angular Application with Nginx
-  hosts: web_servers
+  hosts: local
   become: yes  # Use sudo privileges
   vars:
     domain: "example"  # Replace with your actual domain
-    server_ip: "216.48.181.253"
-    server_user: "ecbeeuser253"
     ssl_enabled: true  # Set to false if you don't need SSL
 
   tasks:
