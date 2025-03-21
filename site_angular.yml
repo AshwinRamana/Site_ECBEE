@@ -59,7 +59,7 @@
     - name: Check if domain already exists in Elasticsearch config
       shell: >
         grep -q "https://{{ domain }}.ecbee.net" 
-        /home/ecbeeuser253/ecbee/Ecommerce-Admin/StoreFront/ElasticSearch/config-middleware/config/server_connection.json
+        /home/ecbeeuser159/ecbee/Ecommerce-Admin/StoreFront/ElasticSearch/config-middleware/config/server_connection.json
       register: domain_exists
       changed_when: false
       failed_when: false
