@@ -1,0 +1,101 @@
+---
+- name: Deploy Angular Application with Nginx
+  hosts: web_servers
+  become: yes  # Use sudo privileges
+  vars:
+    domain: "example"  # Replace with your actual domain
+    server_ip: "216.48.181.253"
+    server_user: "ecbeeuser253"
+    ssl_enabled: true  # Set to false if you don't need SSL
+
+  tasks:
+    - name: Create directory for Angular build files
+      file:
+        path: "/var/www/{{ domain }}.ecbee.net/public_html"
+        state: directory
+        mode: '0755'
+        owner: "{{ server_user }}"
+        group: "{{ server_user }}"
+
+    - name: Create Nginx site configuration file
+      template:
+        src: templates/nginx_site.conf.j2
+        dest: "/etc/nginx/sites-available/{{ domain }}.ecbee.net.conf"
+      notify: Reload Nginx
+
+    - name: Create symbolic link to enable site
+      file:
+        src: "/etc/nginx/sites-available/{{ domain }}.ecbee.net.conf"
+        dest: "/etc/nginx/sites-enabled/{{ domain }}.ecbee.net.conf"
+        state: link
+      notify: Reload Nginx
+
+    - name: Set permissions for web directory
+      file:
+        path: "/var/www/{{ domain }}.ecbee.net/public_html"
+        state: directory
+        mode: '0777'
+        recurse: yes
+
+    - name: Generate SSL certificate with certbot (if enabled)
+      command: >
+        certbot --nginx -d {{ domain }}.ecbee.net --non-interactive
+        --agree-tos --email admin@example.com
+      when: ssl_enabled
+      register: certbot_result
+      changed_when: "'Certificate not yet due for renewal' not in certbot_result.stdout"
+      failed_when: false  # Don't fail if certificate already exists
+
+    - name: Copy SSL certificates to backup location (if enabled)
+      shell: >
+        cp /etc/letsencrypt/live/{{ domain }}.ecbee.net/* 
+        /home/ecbeeuser253/ssl/ecommerce/
+      when: ssl_enabled and certbot_result.changed
+      failed_when: false
+
+    - name: Ensure jq is installed for JSON processing
+      apt:
+        name: jq
+        state: present
+
+    - name: Check if domain already exists in Elasticsearch config
+      shell: >
+        grep -q "https://{{ domain }}.ecbee.net" 
+        /home/ecbeeuser253/ecbee/Ecommerce-Admin/StoreFront/ElasticSearch/config-middleware/config/server_connection.json
+      register: domain_exists
+      changed_when: false
+      failed_when: false
+
+    - name: Update Elasticsearch configuration
+      shell: >
+        jq '. += {"https://{{ domain }}.ecbee.net": "e2e-uat-253"}' 
+        /home/ecbeeuser253/ecbee/Ecommerce-Admin/StoreFront/ElasticSearch/config-middleware/config/server_connection.json > 
+        /tmp/server_connection.json && 
+        mv /tmp/server_connection.json 
+        /home/ecbeeuser253/ecbee/Ecommerce-Admin/StoreFront/ElasticSearch/config-middleware/config/server_connection.json
+      when: domain_exists.rc != 0  # Only update if domain doesn't exist
+      register: es_config_updated
+
+    - name: Restart Elasticsearch configuration service (if updated)
+      shell: >
+        cd /home/ecbeeuser253/ecbee/Ecommerce-Admin/StoreFront/ElasticSearch/config-middleware &&
+        node index.js
+      when: es_config_updated.changed
+      async: 3600  # Run for up to an hour
+      poll: 0      # Don't wait for completion
+
+    - name: Restart all PM2 services
+      shell: pm2 restart all
+      when: es_config_updated.changed
+
+  handlers:
+    - name: Reload Nginx
+      service:
+        name: nginx
+        state: reloaded
+
+    - name: Check Nginx status
+      command: systemctl status nginx
+      register: nginx_status
+      changed_when: false
+      listen: Reload Nginx
